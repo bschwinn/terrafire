@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -e -x
+exec > /tmp/bar 2>&1
+
+# My Name: {{ .Name}}
+
+# set the server environment class and main artifact repo (also puppet master) in facter
+mkdir -p /etc/facter/facts.d/
+echo "server_environment_class={{.Environment}}" > /etc/facter/facts.d/server_environment_class.txt
+echo "artifact_cache_url=http://{{.PuppetMaster}}" > /etc/facter/facts.d/artifact_cache_url.txt
+
+# set the host name
+echo "{{.Hostname}}" > /etc/hostname
+hostname "{{.Hostname}}"
+
+# install puppetlabs yum repo
+PUPPET_PKG="puppetlabs-release-el-6.noarch.rpm"
+curl http://yum.puppetlabs.com/${PUPPET_PKG} -O
+rpm -i ${PUPPET_PKG}
+
+# install puppet 3.2+
+yum -y install puppet
