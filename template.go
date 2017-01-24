@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"path"
 	"text/template"
+	"fmt"
 )
 
 type EC2UserDataTemplateContext struct {
@@ -48,8 +49,10 @@ func createInstanceUserData(config TerraFireRunConfig, inst EC2Instance, instanc
 	if inst.Bootstrap.Footer != "" {
 		res = res + runTemplate(inst.Bootstrap.Footer, templates, ctx)
 	}
-	// TODO figure out how to debug this properly
-	//fmt.Println(res)
+
+	if config.Debug {
+		fmt.Println(res)
+	}
 
 	encoded := base64.StdEncoding.EncodeToString([]byte(res))
 	return encoded
