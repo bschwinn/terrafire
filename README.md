@@ -28,6 +28,26 @@ Terrafire is an incredibly simplistic provisioning system.  It is inspired by Te
 the same name and 2) if it encounters live infrastructure without a corresponding configuration entry.
 
 
+## How do I use this thing?
+
+1. Clone the repo and build the executable:
+```
+cd cmd/terrafire
+go build
+```
+2. Create your own terrafire working directory.  This can be a clean directory where you can start a repo or an existing repo.
+3. Create your own config file using ./cmd/terrafire/config/config.yml as an example.  The file should be named "config.yml" and should live in a "config" directory which is relative to the executable.
+4. If using User Data templates, ensure you configure the templates directory appropriately.
+5. Invoke terrafire to list all your groups:
+```
+./terrafire groups
+```
+6. Invoke terrafire in plan mode to see what it will do, if you need more info, just add a "-d" flag for debugging:
+```
+./terrafire -g your-group-name plan
+```
+
+
 ## FAQ
 
 *Why Terrafire?*
