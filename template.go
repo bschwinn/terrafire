@@ -32,23 +32,25 @@ func createInstanceUserData(config TerraFireRunConfig, inst EC2Instance, instanc
 		},
 	}
 	glob := path.Join(config.TemplatePath, TEMPLATE_GLOB_PATTERN)
-	templates, terr := template.ParseGlob(glob)
+	templates, terr := template.New("terrafire").Funcs(funcMap).ParseGlob(glob)
 	if terr != nil {
 		panic(terr)
 	}
-	templates.Funcs(funcMap)
 
 	// render all the templates
 	res := ""
 	if inst.Bootstrap.Header != "" {
 		res = res + runTemplate(inst.Bootstrap.Header, templates, ctx)
 	}
-	if inst.Bootstrap.Header != "" {
+	if inst.Bootstrap.Content != "" {
 		res = res + runTemplate(inst.Bootstrap.Content, templates, ctx)
 	}
-	if inst.Bootstrap.Header != "" {
+	if inst.Bootstrap.Footer != "" {
 		res = res + runTemplate(inst.Bootstrap.Footer, templates, ctx)
 	}
+	// TODO figure out how to debug this properly
+	//fmt.Println(res)
+
 	encoded := base64.StdEncoding.EncodeToString([]byte(res))
 	return encoded
 }
@@ -63,25 +65,3 @@ func runTemplate(name string, templates *template.Template, ctx EC2UserDataTempl
 	w.Flush()
 	return buffy.String()
 }
-
-
-var bootstrapContentStats = `
-# append puppetmaster hostname to hosts file
-cat >> /etc/hosts << EOF
-{{.PuppetMaster}} puppet
-{{.PuppetMaster}} repos
-{{ "instance_Tier1_0" | PrivateIP}} nitro-stats1
-{{ "instance_Tier1_1" | PrivateIP}} nitro-stats2
-EOF
-`
-
-var bootstrapContentNitro = `
-# append puppetmaster hostname to hosts file
-cat >> /etc/hosts << EOF
-{{.PuppetMaster}} puppet
-{{.PuppetMaster}} repos
-{{ "awstest_maintier_0" | PrivateIP}} nitro-dash
-{{ "awstest_maintier_0" | PrivateIP}} nitro-db
-{{ "awstest_maintier_0" | PrivateIP}} nitro-redis
-EOF
-`

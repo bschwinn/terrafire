@@ -3,82 +3,59 @@ showtags: true
 templatepath: "./tmpl"
 groups:
   -
-    name: "aws"
+    name: "aws-single"
     region: "us-east-1"
-    puppetmaster: "10.0.0.38"
+    puppetmaster: "10.0.0.11"
     tiers:
       -
         name: "innertier"
         instances:
           -
-            name: "nitro-test"
-            hostname: "nitro-test"
+            name: "aws-web01"
+            hostname: "aws-web01"
             type: "m3.xlarge"
             zone: "us-east-1c"
             ami: "ami-962f77fe"
-            secgroups: "sg-04b4857f,sg-f3a15789"
-            subnet: "subnet-e6679fbf"
-            keyname: "brian-nitro"
+            secgroups: "your-secgroup1,your-secgroup2"
+            subnet: "your-subnet1"
+            keyname: "your-key"
+            bootstrap:
+              header: "boot-default.tmpl"
+              footer: "boot-runpuppet.tmpl"
+  -
+    name: "aws-double"
+    region: "us-east-1"
+    puppetmaster: "10.0.0.11"
+    tiers:
+      -
+        name: "innertier"
+        instances:
+          -
+            name: "aws-db01"
+            hostname: "aws-db01"
+            type: "m3.xlarge"
+            zone: "us-east-1c"
+            ami: "ami-962f77fe"
+            secgroups: "your-secgroup1,your-secgroup2"
+            subnet: "your-subnet1"
+            keyname: "your-key"
             bootstrap:
               header: "boot-default.tmpl"
               content: "boot-hosts.tmpl"
               footer: "boot-runpuppet.tmpl"
-  -
-    name: "awstest"
-    region: "us-east-1"
-    puppetmaster: "10.0.0.38"
-    tiers:
-      -
-        name: "innertier"
-        instances:
-          -
-            name: "nitro-db01"
-            hostname: "nitro-db01"
-            type: "m3.xlarge"
-            zone: "us-east-1c"
-            ami: "ami-962f77fe"
-            secgroups: "sg-04b4857f,sg-f3a15789"
-            subnet: "subnet-e6679fbf"
-            keyname: "brian-nitro"
       -
         name: "outertier"
         instances:
           -
-            name: "nitro-server01"
-            hostname: "nitro-server01"
+            name: "aws-web01"
+            hostname: "aws-web01"
             type: "m3.large"
             zone: "us-east-1c"
             ami: "ami-962f77fe"
-            secgroups: "sg-04b4857f,sg-f3a15789"
-            subnet: "subnet-e6679fbf"
-            keyname: "brian-nitro"
+            secgroups: "your-secgroup1,your-secgroup2"
+            subnet: "your-subnet1"
+            keyname: "your-key"
             bootstrap:
               header: "boot-default.tmpl"
-              content: "boot-hosts.tmpl"
+              content: "boot-hosts-web.tmpl"
               footer: "boot-runpuppet.tmpl"
-  -
-    name: "awstest2"
-    region: "us-east-1"
-    puppetmaster: "10.0.0.38"
-    tiers:
-      -
-        name: "tier1"
-        instances:
-          -
-            name: "awstest2_tier1_0"
-          -
-            name: "awstest2_tier1_1"
-          -
-            name: "awstest2_tier1_2"
-      -
-        name: "tier2"
-        instances:
-          -
-            name: "awstest2_tier2_0"
-      -
-        name: "tier3"
-        instances:
-          -
-            name: "awstest2_tier3_0"
-          -
-            name: "awstest2_tier3_1"
