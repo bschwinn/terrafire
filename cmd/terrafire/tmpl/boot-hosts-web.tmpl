@@ -1,7 +1,7 @@
 # append puppetmaster hostname to hosts file
 cat >> /etc/hosts << EOF
 {{.PuppetMaster}} puppet
-{{.PuppetMaster}} repos
+{{.YumRepo}} repos
 
 {{ "aws-db01" | PrivateIP }} aws-db01
 EOF

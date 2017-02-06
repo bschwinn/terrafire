@@ -4,15 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"path"
 	"text/template"
-	"fmt"
 )
 
 type EC2UserDataTemplateContext struct {
 	EC2Instance
 	Environment  string
 	PuppetMaster string
+	YumRepo      string
 	Launched     map[string]EC2InstanceLive
 }
 
@@ -21,7 +22,7 @@ const TEMPLATE_GLOB_PATTERN string = "*.tmpl"
 // util - run the template(s) to create the user data to pass to the instance (the bootstrap script)
 func createInstanceUserData(config TerraFireRunConfig, inst EC2Instance, instanceData map[string]EC2InstanceLive) string {
 	// setup template context and functions
-	ctx := EC2UserDataTemplateContext{inst, config.Group.Name, config.Group.PuppetMaster, instanceData}
+	ctx := EC2UserDataTemplateContext{inst, config.Group.Name, config.Group.PuppetMaster, config.Group.YumRepo, instanceData}
 	// TODO - define more template funcs based on "EC2InstanceLive"
 	funcMap := template.FuncMap{
 		"PrivateIP": func(s string) string {

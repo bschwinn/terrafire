@@ -6,6 +6,7 @@ groups:
     name: "aws-single"
     region: "us-east-1"
     puppetmaster: "10.0.0.11"
+    yumrepo: "10.0.0.21"
     tiers:
       -
         name: "innertier"
@@ -21,11 +22,13 @@ groups:
             keyname: "your-key"
             bootstrap:
               header: "boot-default.tmpl"
+              content: "boot-hosts-web.tmpl"
               footer: "boot-runpuppet.tmpl"
   -
     name: "aws-double"
     region: "us-east-1"
     puppetmaster: "10.0.0.11"
+    yumrepo: "10.0.0.22"
     tiers:
       -
         name: "innertier"

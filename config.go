@@ -33,6 +33,7 @@ type GroupConfig struct {
 	Name         string            `name:"name"`
 	Region       string            `name:"region"`
 	PuppetMaster string            `name:"puppetmaster"`
+	YumRepo      string            `name:"yumrepo"`
 	Tiers        []EC2InstanceTier `name:"tiers"`
 	TemplateDir  string            `name:"template-dir"`
 }
