@@ -3,17 +3,18 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"os"
+	"strings"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/bschwinn/terrafire"
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
-	"io"
-	"io/ioutil"
-	"log"
-	"os"
-	"strings"
 )
 
 var debug bool
@@ -86,7 +87,25 @@ func runGroups(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// sub-command - show all the defined groups
+// sub-command - show all the defined hosts in a group
+func runHosts(cmd *cobra.Command, args []string) error {
+	group, err := getGroup()
+	if err != nil {
+		return err
+	}
+
+	for i := range group.Tiers {
+		tier := group.Tiers[i]
+		for j := range tier.Instances {
+			inst := tier.Instances[j]
+			InfoLog.Printf("%s", inst.Hostname)
+		}
+	}
+
+	return nil
+}
+
+// sub-command - show instance info for live instances in the group
 func runInfo(cmd *cobra.Command, args []string) error {
 	group, err := getGroup()
 	if err != nil {

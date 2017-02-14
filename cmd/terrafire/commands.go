@@ -10,6 +10,7 @@ func init() {
 	RootCmd.AddCommand(applyCmd)
 	RootCmd.AddCommand(destroyCmd)
 	RootCmd.AddCommand(infoCmd)
+	RootCmd.AddCommand(hostsCmd)
 }
 
 // sub-commands
@@ -40,13 +41,6 @@ var planCmd = &cobra.Command{
 	RunE:  runPlan,
 }
 
-var infoCmd = &cobra.Command{
-	Use:   "info",
-	Short: "Show the existing resources for a group.",
-	Long:  `This will show what resources currently are live for a group (group name required).`,
-	RunE:  runInfo,
-}
-
 var applyCmd = &cobra.Command{
 	Use:   "apply",
 	Short: "Run the plan for a group.",
@@ -59,4 +53,18 @@ var destroyCmd = &cobra.Command{
 	Short: "Run the destroy plan for a group.",
 	Long:  `This will DESTROY all resources for a given group (group name required).`,
 	RunE:  runDestroy,
+}
+
+var infoCmd = &cobra.Command{
+	Use:   "info",
+	Short: "Show the existing resources for a group.",
+	Long:  `This will show what resources currently are live for a group (group name required).`,
+	RunE:  runInfo,
+}
+
+var hostsCmd = &cobra.Command{
+	Use:   "hosts",
+	Short: "Show the list of host names for a group.",
+	Long:  `This will show what host names are configured for a group (group name required).`,
+	RunE:  runHosts,
 }
