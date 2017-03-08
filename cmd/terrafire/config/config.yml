@@ -20,6 +20,8 @@ groups:
             secgroups: "your-secgroup1,your-secgroup2"
             subnet: "your-subnet1"
             keyname: "your-key"
+            elasticipid: "your-elastic-ip-id"
+            assocpublic: false
             bootstrap:
               header: "boot-default.tmpl"
               content: "boot-hosts-web.tmpl"
@@ -42,6 +44,11 @@ groups:
             secgroups: "your-secgroup1,your-secgroup2"
             subnet: "your-subnet1"
             keyname: "your-key"
+            assocpublic: true
+            route53:
+              suffix: "your-zone-suffix"
+              zoneid: "your-zone-id"
+              ttl: 3600
             bootstrap:
               header: "boot-default.tmpl"
               content: "boot-hosts.tmpl"
@@ -58,6 +65,11 @@ groups:
             secgroups: "your-secgroup1,your-secgroup2"
             subnet: "your-subnet1"
             keyname: "your-key"
+            assocpublic: true
+            route53:
+              suffix: "your-zone-suffix"
+              zoneid: "your-zone-id"
+              ttl: 3600
             bootstrap:
               header: "boot-default.tmpl"
               content: "boot-hosts-web.tmpl"

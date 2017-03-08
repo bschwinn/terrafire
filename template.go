@@ -9,6 +9,7 @@ import (
 	"text/template"
 )
 
+// EC2UserDataTemplateContext - template rendering context which includes instance config, and some top level properties
 type EC2UserDataTemplateContext struct {
 	EC2Instance
 	Environment  string
@@ -20,7 +21,7 @@ type EC2UserDataTemplateContext struct {
 const TEMPLATE_GLOB_PATTERN string = "*.tmpl"
 
 // util - run the template(s) to create the user data to pass to the instance (the bootstrap script)
-func createInstanceUserData(config TerraFireRunConfig, inst EC2Instance, instanceData map[string]EC2InstanceLive) string {
+func createInstanceUserData(config RunConfig, inst EC2Instance, instanceData map[string]EC2InstanceLive) string {
 	// setup template context and functions
 	ctx := EC2UserDataTemplateContext{inst, config.Group.Name, config.Group.PuppetMaster, config.Group.YumRepo, instanceData}
 	// TODO - define more template funcs based on "EC2InstanceLive"

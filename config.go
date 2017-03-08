@@ -2,40 +2,42 @@ package terrafire
 
 import (
 	"fmt"
+
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
-// Our main config struct definition
-type TerraFireConfig struct {
-	Debug        bool          `name:"debug"`
-	ShowTags     bool          `name:"showtags"`
-	TemplatePath string        `name:"templatepath"`
-	Group        string        `name:"group"`
-	Groups       []GroupConfig `name:"groups"`
+// BaseConfig - Our main config struct definition
+type BaseConfig struct {
+	Debug        bool          `mapstructure:"debug"`
+	ShowTags     bool          `mapstructure:"showtags"`
+	TemplatePath string        `mapstructure:"templatepath"`
+	Group        string        `mapstructure:"group"`
+	Groups       []GroupConfig `mapstructure:"groups"`
 }
 
-type TerraFireRunConfig struct {
-	TerraFireConfig
+// TerraFireRunConfig - config composite of base config, current group and current tier
+type RunConfig struct {
+	BaseConfig
 	Group GroupConfig
 	Tier  EC2InstanceTier
 }
 
-func (tfc TerraFireConfig) String() string {
-	s := fmt.Sprintf("TerraFireConfig{ debug: %t, show-tags: %t, group: %s, template path: %s, groups [", tfc.Debug, tfc.ShowTags, tfc.Group, tfc.TemplatePath)
-	for _, gc := range tfc.Groups {
+func (bc BaseConfig) String() string {
+	s := fmt.Sprintf("TerraFireConfig{ debug: %t, show-tags: %t, group: %s, template path: %s, groups [", bc.Debug, bc.ShowTags, bc.Group, bc.TemplatePath)
+	for _, gc := range bc.Groups {
 		s = s + gc.String()
 	}
 	s = s + "]}"
 	return s
 }
 
+// GroupConfig  - group config
 type GroupConfig struct {
-	Name         string            `name:"name"`
-	Region       string            `name:"region"`
-	PuppetMaster string            `name:"puppetmaster"`
-	YumRepo      string            `name:"yumrepo"`
-	Tiers        []EC2InstanceTier `name:"tiers"`
-	TemplateDir  string            `name:"template-dir"`
+	Name         string            `mapstructure:"name"`
+	Region       string            `mapstructure:"region"`
+	PuppetMaster string            `mapstructure:"puppetmaster"`
+	YumRepo      string            `mapstructure:"yumrepo"`
+	Tiers        []EC2InstanceTier `mapstructure:"tiers"`
 }
 
 func (gc GroupConfig) String() string {
@@ -47,20 +49,22 @@ func (gc GroupConfig) String() string {
 	return s
 }
 
+// EC2InstanceTier  - Teir config for a group
 type EC2InstanceTier struct {
-	Name      string        `name:"name"`
-	Instances []EC2Instance `name:"instances"`
+	Name      string        `mapstructure:"name"`
+	Instances []EC2Instance `mapstructure:"instances"`
 }
 
 func (et EC2InstanceTier) String() string {
 	s := fmt.Sprintf("EC2InstanceTier{ Name: %s, Instances: [", et.Name)
 	for _, t := range et.Instances {
-		s = s + fmt.Sprintf("EC2Instance{ %s }", t.Name)
+		s = s + fmt.Sprintf("EC2Instance{ %v }", t)
 	}
 	s = s + "]}"
 	return s
 }
 
+// GetInstance - get an instance in this tier
 func (et EC2InstanceTier) GetInstance(name string) *EC2Instance {
 	for _, t := range et.Instances {
 		if name == t.Name {
@@ -70,38 +74,53 @@ func (et EC2InstanceTier) GetInstance(name string) *EC2Instance {
 	return nil
 }
 
+// EC2Instance - main config struct for an instance
 type EC2Instance struct {
-	Type       string            `name:"type"`
-	Name       string            `name:"name"`
-	AMI        string            `name:"ami"`
-	Zone       string            `name:"zone"`
-	Subnet     string            `name:"subnet"`
-	SecGroups  string            `name:"secgroups"`
-	KeyName    string            `name:"keyname"`
-	Hostname   string            `name:"hostname"`
-	Bootstrap  TerraFireBoot     `name:"bootstrap"`
-	UserData   string            `name:"userdata"`
-	Properties map[string]string `name:"properties"`
+	Type              string            `mapstructure:"type"`
+	Name              string            `mapstructure:"name"`
+	AMI               string            `mapstructure:"ami"`
+	Zone              string            `mapstructure:"zone"`
+	Subnet            string            `mapstructure:"subnet"`
+	SecGroups         string            `mapstructure:"secgroups"`
+	KeyName           string            `mapstructure:"keyname"`
+	Hostname          string            `mapstructure:"hostname"`
+	ElasticIPID       string            `mapstructure:"elasticipid"`
+	Route53           Route53Config     `mapstructure:"route53"`
+	AssociatePublicIP bool              `mapstructure:"assocpublic"`
+	Bootstrap         BootTemplates     `mapstructure:"bootstrap"`
+	UserData          string            `mapstructure:"userdata"`
+	Properties        map[string]string `mapstructure:"properties"`
 }
 
 func (inst EC2Instance) String() string {
-	return fmt.Sprintf("name: %s, hostname: %s, zone: %s, type: %s, subnet: %s, sec-groups: %s, ami: %s, user data: %s", inst.Name, inst.Hostname, inst.Zone, inst.Type, inst.Subnet, inst.SecGroups, inst.AMI, inst.UserData)
+	return fmt.Sprintf("name: %s, hostname: %s, zone: %s, type: %s, subnet: %s, sec-groups: %s, ami: %s, public ip? %t, elastic ip: %s, route53 zone: %s, user data: %s", inst.Name, inst.Hostname, inst.Zone, inst.Type, inst.Subnet, inst.SecGroups, inst.AMI, inst.AssociatePublicIP, inst.ElasticIPID, inst.Route53.ZoneID, inst.UserData)
 }
 
-type TerraFireBoot struct {
-	Header  string `name:"header"`
-	Content string `name:"content"`
-	Footer  string `name:"footer"`
+// Route53Config - struct for Route53 upsert/delete
+type Route53Config struct {
+	ZoneID string `mapstructure:"zoneid"`
+	Suffix string `mapstructure:"suffix"`
+	TTL    int64  `mapstructure:"ttl"`
 }
 
+// BootTemplates - struct for header/body/footer templates for UserData
+type BootTemplates struct {
+	Header  string `mapstructure:"header"`
+	Content string `mapstructure:"content"`
+	Footer  string `mapstructure:"footer"`
+}
+
+// EC2InstanceLive - config plus some live instance properties
 type EC2InstanceLive struct {
 	EC2Instance
+	InstanceID       string
 	PrivateDnsName   string
 	PrivateIpAddress string
 	PublicIpAddress  string
 	PublicDnsName    string
 }
 
+// Apply - pull in live instance properties
 func (inst EC2InstanceLive) Apply(liveInst *ec2.Instance) {
 	inst.PrivateDnsName = *liveInst.PrivateDnsName
 	inst.PrivateIpAddress = *liveInst.PrivateIpAddress

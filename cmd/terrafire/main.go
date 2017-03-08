@@ -31,7 +31,7 @@ func init() {
 }
 
 // config defaults and merged global instance, structs in config.go
-var ourConfig terrafire.TerraFireConfig
+var ourConfig terrafire.BaseConfig
 
 // main routine - kick off one of the sub-commands
 func main() {
@@ -53,7 +53,7 @@ func main() {
 	}
 
 	// overlay flags on config
-	// TODO shouldn't plags/viper handle this?
+	// TODO shouldn't pflags/viper handle this?
 	if !ourConfig.Debug {
 		ourConfig.Debug = debug
 	}
@@ -114,8 +114,10 @@ func runInfo(cmd *cobra.Command, args []string) error {
 
 	// get existing instances in group
 	InfoLog.Println("Live resourcces in group:")
-	svc := terrafire.CreateEC2Service(group.Region)
-	instances := terrafire.GetGroupInstances(group, svc)
+	sesh := terrafire.CreateAWSSession()
+	ec2 := terrafire.CreateEC2Service(group.Region, sesh)
+
+	instances := terrafire.GetGroupInstances(group, ec2)
 	for i := range instances {
 		ec2Inst := instances[i]
 		InfoLog.Printf(" - %s (ec2 instance) - id: %s, state: %s", terrafire.GetInstanceTag("Name", ec2Inst), aws.StringValue(ec2Inst.InstanceId), terrafire.GetInstanceStateIcon(aws.StringValue(ec2Inst.State.Name)))
@@ -132,7 +134,8 @@ func runPlan(cmd *cobra.Command, args []string) error {
 	}
 
 	// create the plan
-	svc := terrafire.CreateEC2Service(group.Region)
+	sesh := terrafire.CreateAWSSession()
+	svc := terrafire.CreateEC2Service(group.Region, sesh)
 	plan := createPlan(group, svc)
 
 	// show any errors else show the plan (what would be done)
@@ -148,11 +151,11 @@ func runPlan(cmd *cobra.Command, args []string) error {
 		allInstanceData := make(map[string]terrafire.EC2InstanceLive, 0)
 		for i := range plan.Group.Tiers {
 			tier := plan.Group.Tiers[i]
-			trc := terrafire.TerraFireRunConfig{TerraFireConfig: ourConfig, Group: group, Tier: tier}
+			trc := terrafire.RunConfig{BaseConfig: ourConfig, Group: group, Tier: tier}
 			instanceMap := terrafire.RunInstancesNoop(trc, allInstanceData, InfoLog)
 
 			// record instance details for reference in subsequent tiers
-			instanceMapLive := terrafire.GetInstancesNoop(instanceMap)
+			instanceMapLive := terrafire.GetInstancesNoop(trc, instanceMap)
 
 			err := combineInstanceData(tier, instanceMap, instanceMapLive, allInstanceData)
 			if err != nil {
@@ -176,7 +179,9 @@ func runApply(cmd *cobra.Command, args []string) error {
 	}
 
 	// create the plan
-	svc := terrafire.CreateEC2Service(group.Region)
+	sesh := terrafire.CreateAWSSession()
+	svc := terrafire.CreateEC2Service(group.Region, sesh)
+	r53 := terrafire.CreateRoute53Service(sesh)
 	plan := createPlan(group, svc)
 
 	// show any errors else create the earth
@@ -193,12 +198,12 @@ func runApply(cmd *cobra.Command, args []string) error {
 		for i := range plan.Group.Tiers {
 			// run the instances in this tier
 			tier := plan.Group.Tiers[i]
-			trc := terrafire.TerraFireRunConfig{TerraFireConfig: ourConfig, Group: group, Tier: tier}
+			trc := terrafire.RunConfig{BaseConfig: ourConfig, Group: group, Tier: tier}
 			instanceMap := terrafire.RunInstances(svc, trc, allInstanceData, InfoLog)
 
 			// wait for instances to launch
 			InfoLog.Println(" - Waiting for instances to launch:", instanceMap)
-			flt := terrafire.CreateIdInstanceFilter(instanceMap)
+			flt := terrafire.CreateIDInstanceFilter(instanceMap)
 			err := svc.WaitUntilInstanceRunning(flt)
 			if err != nil {
 				panic(err)
@@ -211,6 +216,16 @@ func runApply(cmd *cobra.Command, args []string) error {
 			cerr := combineInstanceData(tier, instanceMap, instanceMapLive, allInstanceData)
 			if cerr != nil {
 				panic(cerr)
+			}
+
+			elasticerr := terrafire.AssociateElasticIP(svc, trc, allInstanceData, InfoLog)
+			if elasticerr != nil {
+				panic(elasticerr)
+			}
+
+			r53err := terrafire.UpdateRoute53(r53, trc, allInstanceData, InfoLog)
+			if r53err != nil {
+				panic(r53err)
 			}
 
 			if ourConfig.Debug {
@@ -230,7 +245,8 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	}
 
 	// create the plan
-	svc := terrafire.CreateEC2Service(group.Region)
+	sesh := terrafire.CreateAWSSession()
+	svc := terrafire.CreateEC2Service(group.Region, sesh)
 	plan := createDestroyPlan(group, svc)
 
 	// show any errors else prompt before total annihilation
@@ -303,19 +319,20 @@ func getGroup() (terrafire.GroupConfig, error) {
 }
 
 // map instanceMapLive (map of id to live instance data) and instanceMap (map of id to name) into allInstanceData (map of name to live instance data)
-func combineInstanceData(tier terrafire.EC2InstanceTier, instanceMap map[string]string, instanceMapLive map[string]*ec2.Instance, allInstanceData map[string]terrafire.EC2InstanceLive) error {
+func combineInstanceData(tier terrafire.EC2InstanceTier, instanceMap map[string]terrafire.EC2Instance, instanceMapLive map[string]*ec2.Instance, allInstanceData map[string]terrafire.EC2InstanceLive) error {
 	if len(instanceMap) != len(instanceMapLive) {
 		return fmt.Errorf("Shit done gone wrong with the launch!?!?!?!?!")
 	}
 	for k, v := range instanceMap {
 		// create new instance based on config and apply live instance data
 		liveInst := instanceMapLive[k]
-		newInst := terrafire.EC2InstanceLive{EC2Instance: *tier.GetInstance(v)}
+		newInst := terrafire.EC2InstanceLive{EC2Instance: *tier.GetInstance(v.Name)}
+		newInst.InstanceID = aws.StringValue(liveInst.InstanceId)
 		newInst.PrivateIpAddress = aws.StringValue(liveInst.PrivateIpAddress)
 		newInst.PrivateDnsName = aws.StringValue(liveInst.PrivateDnsName)
 		newInst.PublicIpAddress = aws.StringValue(liveInst.PublicIpAddress)
 		newInst.PublicDnsName = aws.StringValue(liveInst.PublicDnsName)
-		allInstanceData[v] = newInst
+		allInstanceData[v.Name] = newInst
 	}
 	return nil
 }

@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	"log"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"log"
+	"github.com/aws/aws-sdk-go/service/route53"
 )
 
 var ICON_TERMINATED = "\xE2\x98\xA0"        // skull n bones
@@ -15,8 +17,8 @@ var ICON_RUNNING = "\xF0\x9F\x8D\xBB"       // cheers w/ beers
 var ICON_SHUTTING_DOWN = "\xF0\x9F\x92\xA3" // bombora
 var ICON_DEFAULT = "\xF0\x9F\x92\xA9"       // smiling poo (what else)
 
-// create a re-usable AWS session
-func createAWSSession() *session.Session {
+// CreateAWSSession - create a re-usable AWS session
+func CreateAWSSession() *session.Session {
 	sess, err := session.NewSession()
 	if err != nil {
 		panic(err)
@@ -24,13 +26,17 @@ func createAWSSession() *session.Session {
 	return sess
 }
 
-// create a re-usable AWS EC2 service
-func CreateEC2Service(region string) *ec2.EC2 {
-	sesh := createAWSSession()
+// CreateEC2Service - create a re-usable AWS EC2 service
+func CreateEC2Service(region string, sesh *session.Session) *ec2.EC2 {
 	return ec2.New(sesh, &aws.Config{Region: aws.String(region)})
 }
 
-// util - get a group's instances via call to describe instances
+// CreateRoute53Service - create a re-usable AWS EC2 service
+func CreateRoute53Service(sesh *session.Session) *route53.Route53 {
+	return route53.New(sesh)
+}
+
+// GetGroupInstances - get a group's instances via call to describe instances
 func GetGroupInstances(group GroupConfig, svc *ec2.EC2) []ec2.Instance {
 
 	filter := createGroupInstanceFilter(group)
@@ -51,7 +57,7 @@ func GetGroupInstances(group GroupConfig, svc *ec2.EC2) []ec2.Instance {
 // util - create a run instance input based on our config
 func createRunInstanceInput(inst EC2Instance) *ec2.RunInstancesInput {
 	netSpec := &ec2.InstanceNetworkInterfaceSpecification{
-		AssociatePublicIpAddress: aws.Bool(true),
+		AssociatePublicIpAddress: aws.Bool(inst.AssociatePublicIP),
 		DeviceIndex:              aws.Int64(0),
 		SubnetId:                 aws.String(inst.Subnet),
 		Groups:                   aws.StringSlice(strings.Split(inst.SecGroups, ",")),
@@ -84,8 +90,8 @@ func createGroupInstanceFilter(group GroupConfig) *ec2.DescribeInstancesInput {
 	return flt
 }
 
-// util - build a filter to get instances by id
-func CreateIdInstanceFilter(idMap map[string]string) *ec2.DescribeInstancesInput {
+// CreateIDInstanceFilter - build a filter to get instances by id
+func CreateIDInstanceFilter(idMap map[string]EC2Instance) *ec2.DescribeInstancesInput {
 	var ids []string
 	for id := range idMap {
 		ids = append(ids, id)
@@ -96,7 +102,7 @@ func CreateIdInstanceFilter(idMap map[string]string) *ec2.DescribeInstancesInput
 	return flt
 }
 
-// util - get an instance tag value given a tag name
+// GetInstanceTag - get an instance tag value given a tag name
 func GetInstanceTag(tagname string, instance ec2.Instance) string {
 	for _, tag := range instance.Tags {
 		if tagname == *tag.Key {
@@ -106,7 +112,7 @@ func GetInstanceTag(tagname string, instance ec2.Instance) string {
 	return ""
 }
 
-// util - get an instance tag value given a tag name
+// GetInstanceStateIcon - get an instance tag value given a tag name
 func GetInstanceStateIcon(state string) string {
 	res := ICON_DEFAULT
 	switch state {
@@ -120,10 +126,11 @@ func GetInstanceStateIcon(state string) string {
 	return res
 }
 
-// util - run a list of instances returned a list of instance ids
-func RunInstances(svc *ec2.EC2, config TerraFireRunConfig, instanceData map[string]EC2InstanceLive, logger *log.Logger) map[string]string {
-	instanceMap := make(map[string]string, 0)
+// RunInstances - run all the instances in the whole group
+func RunInstances(svc *ec2.EC2, config RunConfig, instanceData map[string]EC2InstanceLive, logger *log.Logger) map[string]EC2Instance {
+	instanceMap := make(map[string]EC2Instance, 0)
 	for idx := range config.Tier.Instances {
+		// create the instance input and launch
 		inst := config.Tier.Instances[idx]
 		inst.UserData = createInstanceUserData(config, inst, instanceData)
 		ipt := createRunInstanceInput(inst)
@@ -132,10 +139,14 @@ func RunInstances(svc *ec2.EC2, config TerraFireRunConfig, instanceData map[stri
 		if err != nil {
 			panic(err)
 		}
-		newInstanceId := res.Instances[0].InstanceId
-		instanceMap[*newInstanceId] = inst.Name
+
+		// keep the new details in the instance map
+		newInstanceID := res.Instances[0].InstanceId
+		instanceMap[*newInstanceID] = inst
+
+		// tag the newly launched instances
 		_, errtag := svc.CreateTags(&ec2.CreateTagsInput{
-			Resources: []*string{newInstanceId},
+			Resources: []*string{newInstanceID},
 			Tags: []*ec2.Tag{
 				{
 					Key:   aws.String("Name"),
@@ -152,25 +163,26 @@ func RunInstances(svc *ec2.EC2, config TerraFireRunConfig, instanceData map[stri
 			},
 		})
 		if errtag != nil {
-			panic(fmt.Errorf("ERROR Could not create tags for instance: %s, error: %s", *newInstanceId, errtag))
+			panic(fmt.Errorf("ERROR Could not create tags for instance: %s, error: %s", *newInstanceID, errtag))
 		}
 	}
 	return instanceMap
 }
 
-func RunInstancesNoop(config TerraFireRunConfig, instanceData map[string]EC2InstanceLive, logger *log.Logger) map[string]string {
-	instanceMap := make(map[string]string, 0)
+// RunInstancesNoop - simulate a run
+func RunInstancesNoop(config RunConfig, instanceData map[string]EC2InstanceLive, logger *log.Logger) map[string]EC2Instance {
+	instanceMap := make(map[string]EC2Instance, 0)
 	for idx := range config.Tier.Instances {
 		inst := config.Tier.Instances[idx]
 		inst.UserData = createInstanceUserData(config, inst, instanceData)
 		logger.Printf("Launching (noop): %v\n", inst.Name)
-		newInstanceId := fmt.Sprintf("instance_%s_%d", config.Tier.Name, idx)
-		instanceMap[newInstanceId] = inst.Name
+		newInstanceID := fmt.Sprintf("instance_%s_%d", config.Tier.Name, idx)
+		instanceMap[newInstanceID] = inst
 	}
 	return instanceMap
 }
 
-// util - run a list of instances returned a list of instance ids
+// GetInstances - get instance data
 func GetInstances(svc *ec2.EC2, flt *ec2.DescribeInstancesInput) map[string]*ec2.Instance {
 	instanceData := make(map[string]*ec2.Instance, 0)
 	launched, err := svc.DescribeInstances(flt)
@@ -187,21 +199,90 @@ func GetInstances(svc *ec2.EC2, flt *ec2.DescribeInstancesInput) map[string]*ec2
 	return instanceData
 }
 
-func GetInstancesNoop(instanceMap map[string]string) map[string]*ec2.Instance {
+// GetInstancesNoop - generate fake instance data
+func GetInstancesNoop(config RunConfig, instanceMap map[string]EC2Instance) map[string]*ec2.Instance {
 	instanceData := make(map[string]*ec2.Instance, 0)
 	for idx := range instanceMap {
-		inst := createFakeEC2Instance(idx)
+		instConf := instanceMap[idx]
+		inst := createFakeEC2Instance(instConf)
 		instanceData[idx] = inst
 	}
 	return instanceData
 }
 
-func createFakeEC2Instance(id string) *ec2.Instance {
+// AssociateElasticIP - associate instances with any elastic IP addresses
+func AssociateElasticIP(svc *ec2.EC2, runConf RunConfig, instanceData map[string]EC2InstanceLive, logger *log.Logger) error {
+	for idx := range runConf.Tier.Instances {
+		inst := runConf.Tier.Instances[idx]
+		linst := instanceData[inst.Name]
+		// associate any elastic IPs with the newly launched instance
+		if !inst.AssociatePublicIP && (inst.ElasticIPID != "") {
+			_, errip := svc.AssociateAddress(&ec2.AssociateAddressInput{
+				AllocationId: aws.String(inst.ElasticIPID),
+				InstanceId:   aws.String(linst.InstanceID),
+			})
+			if errip != nil {
+				return errip
+			}
+		}
+	}
+	return nil
+}
+
+// UpdateRoute53 - updates the route53 "A" records for nodes in this tier
+func UpdateRoute53(svc *route53.Route53, runConf RunConfig, instanceData map[string]EC2InstanceLive, logger *log.Logger) error {
+	for idx := range runConf.Tier.Instances {
+		inst := runConf.Tier.Instances[idx]
+		if inst.Route53.ZoneID != "" && inst.Route53.Suffix != "" {
+			linst := instanceData[inst.Name]
+			fqdn := inst.Name + "." + inst.Route53.Suffix
+			r53params := updateRoute53ARecord(inst.Route53.ZoneID, fqdn, linst.PrivateIpAddress, inst.Route53.TTL)
+			resp, err := svc.ChangeResourceRecordSets(r53params)
+			if err != nil {
+				return err
+			}
+			logger.Println(resp)
+		}
+	}
+	return nil
+}
+
+func updateRoute53ARecord(zoneID, name, ipaddr string, ttl int64) *route53.ChangeResourceRecordSetsInput {
+	return createRoute53Params("UPSERT", "A", zoneID, name, ipaddr, ttl)
+}
+
+func createRoute53Params(action, recordType, zoneID, name, ipaddr string, ttl int64) *route53.ChangeResourceRecordSetsInput {
+	params := &route53.ChangeResourceRecordSetsInput{
+		ChangeBatch: &route53.ChangeBatch{
+			Changes: []*route53.Change{
+				{
+					Action: aws.String(action),
+					ResourceRecordSet: &route53.ResourceRecordSet{
+						Name: aws.String(name),
+						Type: aws.String(recordType),
+						ResourceRecords: []*route53.ResourceRecord{
+							{
+								Value: aws.String(ipaddr),
+							},
+						},
+						TTL: aws.Int64(ttl),
+					},
+				},
+			},
+		},
+		HostedZoneId: aws.String(zoneID),
+	}
+	return params
+}
+
+func createFakeEC2Instance(instConf EC2Instance) *ec2.Instance {
 	inst := &ec2.Instance{
-		PrivateDnsName:   aws.String(fmt.Sprintf("%s_PrivateDNS(computed)", id)),
-		PrivateIpAddress: aws.String(fmt.Sprintf("%s_PrivateIP(computed)", id)),
-		PublicIpAddress:  aws.String(fmt.Sprintf("%s_PublicIP(computed)", id)),
-		PublicDnsName:    aws.String(fmt.Sprintf("%s_PublicDNS(computed)", id)),
+		PrivateDnsName:   aws.String(fmt.Sprintf("%s_PrivateDNS(computed)", instConf.Name)),
+		PrivateIpAddress: aws.String(fmt.Sprintf("%s_PrivateIP(computed)", instConf.Name)),
+	}
+	if instConf.AssociatePublicIP {
+		inst.PublicIpAddress = aws.String(fmt.Sprintf("%s_PublicIP(computed)", instConf.Name))
+		inst.PublicDnsName = aws.String(fmt.Sprintf("%s_PublicDNS(computed)", instConf.Name))
 	}
 	return inst
 }
