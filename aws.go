@@ -37,12 +37,12 @@ func CreateRoute53Service(sesh *session.Session) *route53.Route53 {
 }
 
 // GetGroupInstances - get a group's instances via call to describe instances
-func GetGroupInstances(group GroupConfig, svc *ec2.EC2) []ec2.Instance {
+func GetGroupInstances(group GroupConfig, svc *ec2.EC2) ([]ec2.Instance, error) {
 
 	filter := createGroupInstanceFilter(group)
 	resp, err := svc.DescribeInstances(filter)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	instances := make([]ec2.Instance, 0)
@@ -51,7 +51,7 @@ func GetGroupInstances(group GroupConfig, svc *ec2.EC2) []ec2.Instance {
 			instances = append(instances, *inst)
 		}
 	}
-	return instances
+	return instances, nil
 }
 
 // util - create a run instance input based on our config
@@ -127,7 +127,7 @@ func GetInstanceStateIcon(state string) string {
 }
 
 // RunInstances - run all the instances in the whole group
-func RunInstances(svc *ec2.EC2, config RunConfig, instanceData map[string]EC2InstanceLive, logger *log.Logger) map[string]EC2Instance {
+func RunInstances(svc *ec2.EC2, config RunConfig, instanceData map[string]EC2InstanceLive, logger *log.Logger) (map[string]EC2Instance, error) {
 	instanceMap := make(map[string]EC2Instance, 0)
 	for idx := range config.Tier.Instances {
 		// create the instance input and launch
@@ -137,7 +137,7 @@ func RunInstances(svc *ec2.EC2, config RunConfig, instanceData map[string]EC2Ins
 		logger.Printf("Launching: %v\n", inst.Name)
 		res, err := svc.RunInstances(ipt)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		// keep the new details in the instance map
@@ -166,7 +166,7 @@ func RunInstances(svc *ec2.EC2, config RunConfig, instanceData map[string]EC2Ins
 			panic(fmt.Errorf("ERROR Could not create tags for instance: %s, error: %s", *newInstanceID, errtag))
 		}
 	}
-	return instanceMap
+	return instanceMap, nil
 }
 
 // RunInstancesNoop - simulate a run

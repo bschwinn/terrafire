@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 
+	"errors"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/bschwinn/terrafire"
@@ -19,11 +21,11 @@ import (
 
 var debug bool
 var selectedGroup string
-var InfoLog *log.Logger
-var DebugLog *log.Logger
-var ErrorLog *log.Logger
+var infoLog *log.Logger
+var debugLog *log.Logger
+var errorLog *log.Logger
 
-const DESTROY_OK = "YES"
+const destroyOk = "YES"
 
 func init() {
 	flag.BoolVarP(&debug, "debug", "d", false, "debugging flag, will dump viper/cobra data")
@@ -45,11 +47,12 @@ func main() {
 	viper.SetConfigType("yml")
 	err := viper.ReadInConfig()
 	if err != nil {
-		panic(fmt.Errorf("Fatal error config file: %s \n", err))
+		panic(fmt.Errorf("fatal error config file: %s", err))
 	}
 	err = viper.Unmarshal(&ourConfig)
 	if err != nil {
-		panic(fmt.Errorf("Fatal error unmarshalling config file: %s \n", err))
+		fmt.Printf("fatal error unmarshalling config file: %s", err)
+		os.Exit(1)
 	}
 
 	// overlay flags on config
@@ -73,16 +76,17 @@ func main() {
 
 	// execution
 	if err := RootCmd.Execute(); err != nil {
-		os.Exit(-1)
+		errorLog.Fatal(err)
 	}
+
 	os.Exit(0)
 }
 
 // sub-command - show all the defined groups
 func runGroups(cmd *cobra.Command, args []string) error {
-	InfoLog.Println("All Groups:")
+	infoLog.Println("All Groups:")
 	for _, grp := range ourConfig.Groups {
-		InfoLog.Println(" - ", grp.Name)
+		infoLog.Println(" - ", grp.Name)
 	}
 	return nil
 }
@@ -98,7 +102,7 @@ func runHosts(cmd *cobra.Command, args []string) error {
 		tier := group.Tiers[i]
 		for j := range tier.Instances {
 			inst := tier.Instances[j]
-			InfoLog.Printf("%s", inst.Hostname)
+			infoLog.Printf("%s", inst.Hostname)
 		}
 	}
 
@@ -109,18 +113,21 @@ func runHosts(cmd *cobra.Command, args []string) error {
 func runInfo(cmd *cobra.Command, args []string) error {
 	group, err := getGroup()
 	if err != nil {
-		return err
+		errorLog.Fatal(err)
 	}
 
 	// get existing instances in group
-	InfoLog.Println("Live resourcces in group:")
+	infoLog.Println("Live resourcces in group:")
 	sesh := terrafire.CreateAWSSession()
 	ec2 := terrafire.CreateEC2Service(group.Region, sesh)
 
-	instances := terrafire.GetGroupInstances(group, ec2)
+	instances, err := terrafire.GetGroupInstances(group, ec2)
+	if err != nil {
+		errorLog.Fatal(err)
+	}
 	for i := range instances {
 		ec2Inst := instances[i]
-		InfoLog.Printf(" - %s (ec2 instance) - id: %s, state: %s", terrafire.GetInstanceTag("Name", ec2Inst), aws.StringValue(ec2Inst.InstanceId), terrafire.GetInstanceStateIcon(aws.StringValue(ec2Inst.State.Name)))
+		infoLog.Printf(" - %s (ec2 instance) - id: %s, state: %s", terrafire.GetInstanceTag("Name", ec2Inst), aws.StringValue(ec2Inst.InstanceId), terrafire.GetInstanceStateIcon(aws.StringValue(ec2Inst.State.Name)))
 	}
 
 	return nil
@@ -130,29 +137,32 @@ func runInfo(cmd *cobra.Command, args []string) error {
 func runPlan(cmd *cobra.Command, args []string) error {
 	group, err := getGroup()
 	if err != nil {
-		return err
+		errorLog.Fatal(err)
 	}
 
 	// create the plan
 	sesh := terrafire.CreateAWSSession()
 	svc := terrafire.CreateEC2Service(group.Region, sesh)
-	plan := createPlan(group, svc)
+	plan, planerr := createPlan(group, svc)
+	if planerr != nil {
+		errorLog.Fatal(planerr)
+	}
 
 	// show any errors else show the plan (what would be done)
 	if len(plan.Errors) > 0 {
-		InfoLog.Println("Error(s) in plan")
+		infoLog.Println("Error(s) in plan")
 		for errIdx := range plan.Errors {
-			InfoLog.Println(plan.Errors[errIdx])
+			infoLog.Println(plan.Errors[errIdx])
 		}
 	} else {
 
-		InfoLog.Println("Plan looks OK, running....")
+		infoLog.Println("Plan looks OK, running....")
 
 		allInstanceData := make(map[string]terrafire.EC2InstanceLive, 0)
 		for i := range plan.Group.Tiers {
 			tier := plan.Group.Tiers[i]
 			trc := terrafire.RunConfig{BaseConfig: ourConfig, Group: group, Tier: tier}
-			instanceMap := terrafire.RunInstancesNoop(trc, allInstanceData, InfoLog)
+			instanceMap := terrafire.RunInstancesNoop(trc, allInstanceData, infoLog)
 
 			// record instance details for reference in subsequent tiers
 			instanceMapLive := terrafire.GetInstancesNoop(trc, instanceMap)
@@ -163,8 +173,8 @@ func runPlan(cmd *cobra.Command, args []string) error {
 			}
 
 			if ourConfig.Debug {
-				DebugLog.Printf("Tier created: %v\n", instanceMapLive)
-				DebugLog.Printf("All Instance Data: %v\n", allInstanceData)
+				debugLog.Printf("Tier created: %v\n", instanceMapLive)
+				debugLog.Printf("All Instance Data: %v\n", allInstanceData)
 			}
 		}
 	}
@@ -175,62 +185,68 @@ func runPlan(cmd *cobra.Command, args []string) error {
 func runApply(cmd *cobra.Command, args []string) error {
 	group, err := getGroup()
 	if err != nil {
-		return err
+		errorLog.Fatal(err)
 	}
 
 	// create the plan
 	sesh := terrafire.CreateAWSSession()
 	svc := terrafire.CreateEC2Service(group.Region, sesh)
 	r53 := terrafire.CreateRoute53Service(sesh)
-	plan := createPlan(group, svc)
+	plan, planerr := createPlan(group, svc)
+	if planerr != nil {
+		errorLog.Fatal(planerr)
+	}
 
 	// show any errors else create the earth
 	if len(plan.Errors) > 0 {
-		InfoLog.Println("Error(s) in plan")
+		infoLog.Println("Error(s) in plan")
 		for errIdx := range plan.Errors {
-			InfoLog.Println(plan.Errors[errIdx])
+			infoLog.Println(plan.Errors[errIdx])
 		}
 	} else {
 
-		InfoLog.Println("Plan looks OK, running....")
+		infoLog.Println("Plan looks OK, running....")
 
 		allInstanceData := make(map[string]terrafire.EC2InstanceLive, 0)
 		for i := range plan.Group.Tiers {
 			// run the instances in this tier
 			tier := plan.Group.Tiers[i]
 			trc := terrafire.RunConfig{BaseConfig: ourConfig, Group: group, Tier: tier}
-			instanceMap := terrafire.RunInstances(svc, trc, allInstanceData, InfoLog)
+			instanceMap, err := terrafire.RunInstances(svc, trc, allInstanceData, infoLog)
+			if err != nil {
+				errorLog.Fatal(err)
+			}
 
 			// wait for instances to launch
-			InfoLog.Println(" - Waiting for instances to launch:", instanceMap)
+			infoLog.Println(" - Waiting for instances to launch:", instanceMap)
 			flt := terrafire.CreateIDInstanceFilter(instanceMap)
-			err := svc.WaitUntilInstanceRunning(flt)
-			if err != nil {
-				panic(err)
+			err2 := svc.WaitUntilInstanceRunning(flt)
+			if err2 != nil {
+				errorLog.Fatal(err2)
 			}
-			InfoLog.Println(" - Instances have launched, looking up instance info....")
+			infoLog.Println(" - Instances have launched, looking up instance info....")
 
 			// record instance details for reference in subsequent tiers
 			instanceMapLive := terrafire.GetInstances(svc, flt)
 
 			cerr := combineInstanceData(tier, instanceMap, instanceMapLive, allInstanceData)
 			if cerr != nil {
-				panic(cerr)
+				errorLog.Fatal(cerr)
 			}
 
-			elasticerr := terrafire.AssociateElasticIP(svc, trc, allInstanceData, InfoLog)
+			elasticerr := terrafire.AssociateElasticIP(svc, trc, allInstanceData, infoLog)
 			if elasticerr != nil {
-				panic(elasticerr)
+				errorLog.Fatal(elasticerr)
 			}
 
-			r53err := terrafire.UpdateRoute53(r53, trc, allInstanceData, InfoLog)
+			r53err := terrafire.UpdateRoute53(r53, trc, allInstanceData, infoLog)
 			if r53err != nil {
-				panic(r53err)
+				errorLog.Fatal(r53err)
 			}
 
 			if ourConfig.Debug {
-				DebugLog.Printf(" - Tier created: %v\n", instanceMapLive)
-				DebugLog.Printf(" - All Instance Data: %v\n", allInstanceData)
+				debugLog.Printf(" - Tier created: %v\n", instanceMapLive)
+				debugLog.Printf(" - All Instance Data: %v\n", allInstanceData)
 			}
 		}
 	}
@@ -241,37 +257,40 @@ func runApply(cmd *cobra.Command, args []string) error {
 func runDestroy(cmd *cobra.Command, args []string) error {
 	group, err := getGroup()
 	if err != nil {
-		return err
+		errorLog.Fatal(err)
 	}
 
 	// create the plan
 	sesh := terrafire.CreateAWSSession()
 	svc := terrafire.CreateEC2Service(group.Region, sesh)
-	plan := createDestroyPlan(group, svc)
+	plan, planerr := createDestroyPlan(group, svc)
+	if planerr != nil {
+		errorLog.Fatal(planerr)
+	}
 
 	// show any errors else prompt before total annihilation
 	if len(plan.Errors) > 0 {
-		InfoLog.Println("Error(s) in destroy plan")
+		infoLog.Println("Error(s) in destroy plan")
 		for errIdx := range plan.Errors {
-			InfoLog.Println(plan.Errors[errIdx])
+			infoLog.Println(plan.Errors[errIdx])
 		}
 	} else {
-		InfoLog.Println("Plan looks OK, Are you sure you want to destroy these resources?")
+		infoLog.Println("Plan looks OK, Are you sure you want to destroy these resources?")
 
 		for i := range plan.Group.Tiers {
 			tier := plan.Group.Tiers[i]
 			for idx := range tier.Instances {
 				inst := tier.Instances[idx]
-				InfoLog.Printf(" - %s (%s)\n", inst.Name, "ec2 instance")
+				infoLog.Printf(" - %s (%s)\n", inst.Name, "ec2 instance")
 			}
 		}
 
 		// Prompt and read for "yes" in order to destroy all the things
 		reader := bufio.NewReader(os.Stdin)
-		InfoLog.Printf("If you're absolutely sure you want to destroy the \nabove resources, enter \"%s\" to proceed.", DESTROY_OK)
+		infoLog.Printf("If you're absolutely sure you want to destroy the \nabove resources, enter \"%s\" to proceed.", destroyOk)
 		text, _ := reader.ReadString('\n')
-		DebugLog.Printf("Instance IDs that are about to be destroyed: %v", plan.InstanceIds)
-		if strings.TrimSpace(text) == DESTROY_OK {
+		debugLog.Printf("Instance IDs that are about to be destroyed: %v", plan.InstanceIds)
+		if strings.TrimSpace(text) == destroyOk {
 			flt := &ec2.TerminateInstancesInput{
 				InstanceIds: aws.StringSlice(plan.InstanceIds),
 			}
@@ -279,9 +298,9 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				panic(err)
 			}
-			DebugLog.Printf("Terminate output: %v", termOut)
+			debugLog.Printf("Terminate output: %v", termOut)
 		} else {
-			InfoLog.Print("No problem, we won't be destroying anything this time. \nFeel free to re-run destroy when you're feeling more destructive.")
+			infoLog.Print("No problem, we won't be destroying anything this time. \nFeel free to re-run destroy when you're feeling more destructive.")
 		}
 
 	}
@@ -291,37 +310,36 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 // util - intialize the loggers
 func initLoggers(infoWriter, debugWriter, errorWriter io.Writer) {
 	if ourConfig.Debug {
-		InfoLog = log.New(infoWriter, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile)
+		infoLog = log.New(infoWriter, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile)
 
 	} else {
-		InfoLog = log.New(infoWriter, "", 0)
+		infoLog = log.New(infoWriter, "", 0)
 
 	}
-	DebugLog = log.New(debugWriter, "DEBUG: ", log.Ldate|log.Ltime|log.Lshortfile)
-	ErrorLog = log.New(errorWriter, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
+	debugLog = log.New(debugWriter, "DEBUG: ", log.Ldate|log.Ltime|log.Lshortfile)
+	errorLog = log.New(errorWriter, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
 }
 
 // util - get a single group configuration by name, error if not found
 func getGroup() (terrafire.GroupConfig, error) {
 	if ourConfig.Group == "" {
-		return terrafire.GroupConfig{}, fmt.Errorf("Terrafire group not specified.")
+		return terrafire.GroupConfig{}, fmt.Errorf("terrafire group can not be empty")
 	}
 	for _, grp := range ourConfig.Groups {
 		if grp.Name == ourConfig.Group {
 			if grp.Region != "" {
 				return grp, nil
-			} else {
-				return terrafire.GroupConfig{}, fmt.Errorf("Terraform group '%s' must have a region defined.", ourConfig.Group)
 			}
+			return terrafire.GroupConfig{}, fmt.Errorf("terraform group '%s' must have a region defined", ourConfig.Group)
 		}
 	}
-	return terrafire.GroupConfig{}, fmt.Errorf("Terrafire group '%s' not found.", ourConfig.Group)
+	return terrafire.GroupConfig{}, fmt.Errorf("terrafire group '%s' not found, run the 'groups' command to see all groups", ourConfig.Group)
 }
 
 // map instanceMapLive (map of id to live instance data) and instanceMap (map of id to name) into allInstanceData (map of name to live instance data)
 func combineInstanceData(tier terrafire.EC2InstanceTier, instanceMap map[string]terrafire.EC2Instance, instanceMapLive map[string]*ec2.Instance, allInstanceData map[string]terrafire.EC2InstanceLive) error {
 	if len(instanceMap) != len(instanceMapLive) {
-		return fmt.Errorf("Shit done gone wrong with the launch!?!?!?!?!")
+		return fmt.Errorf("all instances have NOT launched, attempted: %d, launched: %d", len(instanceMap), len(instanceMapLive))
 	}
 	for k, v := range instanceMap {
 		// create new instance based on config and apply live instance data
@@ -348,28 +366,32 @@ func debugConfig() {
 		delim = ","
 
 	}
-	DebugLog.Printf("Terrafire(viper) { %s }", vprDbg)
-	DebugLog.Printf("Terrafire(parsed): { %v }", ourConfig)
+	debugLog.Printf("Terrafire(viper) { %s }", vprDbg)
+	debugLog.Printf("Terrafire(parsed): { %v }", ourConfig)
 }
 
 /*************  PLAN STUFF *************/
 
-// the plan, basically a list of errors and things we'd otherwise create/destroy
+// TerrafirePlan - all the things that will be created as well as a list of any errors
 type TerrafirePlan struct {
 	Group  terrafire.GroupConfig
 	Errors []string
 }
+
+// TerrafireDestroyPlan - all the things that will be created as well as a list of any errors
 type TerrafireDestroyPlan struct {
 	TerrafirePlan
 	InstanceIds []string
 }
 
 // create the plan of attack for instantiating all the things
-func createPlan(group terrafire.GroupConfig, svc *ec2.EC2) TerrafirePlan {
-
-	instances, used := gatherPlanData(group, svc)
+func createPlan(group terrafire.GroupConfig, svc *ec2.EC2) (TerrafirePlan, error) {
 
 	plan := TerrafirePlan{Group: group}
+	instances, used, err := gatherPlanData(group, svc)
+	if err != nil {
+		return plan, err
+	}
 
 	// step 2 - check for existing live instances and build Error list
 	errors := make([]string, 0)
@@ -382,7 +404,7 @@ func createPlan(group terrafire.GroupConfig, svc *ec2.EC2) TerrafirePlan {
 		tagName := terrafire.GetInstanceTag("Name", inst)
 		if tagName == "" {
 			// TODO figure out what this case is ?
-			ErrorLog.Println("Null tagname found for instance. ", inst.InstanceId)
+			errorLog.Println("Null tagname found for instance. ", inst.InstanceId)
 			continue
 		}
 		if exists, _ := used[tagName]; exists {
@@ -391,14 +413,17 @@ func createPlan(group terrafire.GroupConfig, svc *ec2.EC2) TerrafirePlan {
 	}
 	plan.Errors = errors
 
-	return plan
+	return plan, nil
 }
 
 // create the plan of attack for DESTROYING all the things
-func createDestroyPlan(group terrafire.GroupConfig, svc *ec2.EC2) TerrafireDestroyPlan {
+func createDestroyPlan(group terrafire.GroupConfig, svc *ec2.EC2) (TerrafireDestroyPlan, error) {
 
-	instances, configed := gatherPlanData(group, svc)
 	plan := TerrafirePlan{Group: group}
+	instances, configed, err := gatherPlanData(group, svc)
+	if err != nil {
+		return TerrafireDestroyPlan{plan, []string{}}, err
+	}
 
 	// step 2 - validate plan
 	errors := make([]string, 0)
@@ -408,7 +433,7 @@ func createDestroyPlan(group terrafire.GroupConfig, svc *ec2.EC2) TerrafireDestr
 		inst := instances[instIdx]
 		tagName := terrafire.GetInstanceTag("Name", inst)
 		if tagName == "" {
-			ErrorLog.Println("Null tagname found for instance. ", inst.InstanceId)
+			errorLog.Println("Null tagname found for instance. ", inst.InstanceId)
 			continue
 		}
 		// check that our configuration matches actual AWS instances
@@ -426,14 +451,24 @@ func createDestroyPlan(group terrafire.GroupConfig, svc *ec2.EC2) TerrafireDestr
 	}
 	plan.Errors = errors
 	destPlan := TerrafireDestroyPlan{TerrafirePlan: plan, InstanceIds: existingIds}
-	return destPlan
+	return destPlan, nil
 }
 
 // gather up the config, the live instance info and make a list of configured (taken) names
-func gatherPlanData(group terrafire.GroupConfig, svc *ec2.EC2) ([]ec2.Instance, map[string]bool) {
+func gatherPlanData(group terrafire.GroupConfig, svc *ec2.EC2) ([]ec2.Instance, map[string]bool, error) {
 
 	// get existing instances in group
-	instances := terrafire.GetGroupInstances(group, svc)
+	instances, err := terrafire.GetGroupInstances(group, svc)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// check for empty tiers (illegal)
+	for _, tier := range group.Tiers {
+		if len(tier.Instances) < 1 {
+			return nil, nil, errors.New("a tier must contain at least one instance")
+		}
+	}
 
 	// create a map of existing instance names
 	names := make(map[string]bool)
@@ -443,5 +478,5 @@ func gatherPlanData(group terrafire.GroupConfig, svc *ec2.EC2) ([]ec2.Instance, 
 			names[tier.Instances[idx].Name] = true
 		}
 	}
-	return instances, names
+	return instances, names, nil
 }
