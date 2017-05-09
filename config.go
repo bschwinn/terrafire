@@ -110,9 +110,10 @@ func (inst EC2Instance) String() string {
 
 // Route53Config - struct for Route53 upsert/delete
 type Route53Config struct {
-	ZoneID string `mapstructure:"zoneid"`
-	Suffix string `mapstructure:"suffix"`
-	TTL    int64  `mapstructure:"ttl"`
+	RecordType string `mapstructure:"type"`
+	ZoneID     string `mapstructure:"zoneid"`
+	Suffix     string `mapstructure:"suffix"`
+	TTL        int64  `mapstructure:"ttl"`
 }
 
 // PostLaunch - struct for encapsulating a command

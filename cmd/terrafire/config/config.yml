@@ -46,6 +46,7 @@ groups:
             keyname: "your-key"
             assocpublic: true
             route53:
+              type: "A"
               suffix: "your-zone-suffix"
               zoneid: "your-zone-id"
               ttl: 3600
@@ -67,6 +68,7 @@ groups:
             keyname: "your-key"
             assocpublic: true
             route53:
+              type: "CNAME"
               suffix: "your-zone-suffix"
               zoneid: "your-zone-id"
               ttl: 3600

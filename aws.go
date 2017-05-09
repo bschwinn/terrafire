@@ -240,7 +240,11 @@ func UpdateRoute53(svc *route53.Route53, runConf RunConfig, instanceData map[str
 		if inst.Route53.ZoneID != "" && inst.Route53.Suffix != "" {
 			linst := instanceData[inst.Name]
 			fqdn := inst.Name + "." + inst.Route53.Suffix
-			r53params := updateRoute53ARecord(inst.Route53.ZoneID, fqdn, linst.PrivateIpAddress, inst.Route53.TTL)
+			val := linst.PublicIpAddress
+			if inst.Route53.RecordType == "CNAME" {
+				val = linst.PublicDnsName
+			}
+			r53params := createRoute53Params("UPSERT", inst.Route53.RecordType, inst.Route53.ZoneID, fqdn, val, inst.Route53.TTL)
 			resp, err := svc.ChangeResourceRecordSets(r53params)
 			if err != nil {
 				return err
@@ -249,10 +253,6 @@ func UpdateRoute53(svc *route53.Route53, runConf RunConfig, instanceData map[str
 		}
 	}
 	return nil
-}
-
-func updateRoute53ARecord(zoneID, name, ipaddr string, ttl int64) *route53.ChangeResourceRecordSetsInput {
-	return createRoute53Params("UPSERT", "A", zoneID, name, ipaddr, ttl)
 }
 
 func createRoute53Params(action, recordType, zoneID, name, ipaddr string, ttl int64) *route53.ChangeResourceRecordSetsInput {
@@ -303,6 +303,7 @@ func PostProcessInstances(groupConf GroupConfig, logger *log.Logger) error {
 			logger.Printf("Running post launch on instance: %s, script: %+v", inst.Name, inst.PostLaunch)
 			go func() {
 				cmd := exec.Command(inst.PostLaunch.Command, inst.PostLaunch.Args...)
+				cmd.Dir = inst.PostLaunch.Dir
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
 				err := cmd.Run()
