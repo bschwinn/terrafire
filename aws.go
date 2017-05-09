@@ -2,9 +2,13 @@ package terrafire
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"log"
+
+	"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -39,7 +43,7 @@ func CreateRoute53Service(sesh *session.Session) *route53.Route53 {
 // GetGroupInstances - get a group's instances via call to describe instances
 func GetGroupInstances(group GroupConfig, svc *ec2.EC2) ([]ec2.Instance, error) {
 
-	filter := createGroupInstanceFilter(group)
+	filter := CreateGroupInstanceFilter(group)
 	resp, err := svc.DescribeInstances(filter)
 	if err != nil {
 		return nil, err
@@ -74,7 +78,7 @@ func createRunInstanceInput(inst EC2Instance) *ec2.RunInstancesInput {
 }
 
 // util - build a filter to check tags "Launcher=Terrafire" and "TerrafireGroup=group"
-func createGroupInstanceFilter(group GroupConfig) *ec2.DescribeInstancesInput {
+func CreateGroupInstanceFilter(group GroupConfig) *ec2.DescribeInstancesInput {
 	flt := &ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			{
@@ -285,4 +289,44 @@ func createFakeEC2Instance(instConf EC2Instance) *ec2.Instance {
 		inst.PublicDnsName = aws.String(fmt.Sprintf("%s_PublicDNS(computed)", instConf.Name))
 	}
 	return inst
+}
+
+// PostProcessInstances - runs the post-process script for each instance
+func PostProcessInstances(groupConf GroupConfig, logger *log.Logger) error {
+	count := groupConf.InstanceCount()
+	var waiter sync.WaitGroup
+	waiter.Add(count)
+	for i := range groupConf.Tiers {
+		tier := groupConf.Tiers[i]
+		for j := range tier.Instances {
+			inst := tier.Instances[j]
+			logger.Printf("Running post launch on instance: %s, script: %+v", inst.Name, inst.PostLaunch)
+			go func() {
+				cmd := exec.Command(inst.PostLaunch.Command, inst.PostLaunch.Args...)
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				err := cmd.Run()
+				if err != nil {
+					logger.Printf("Error running post launch script: %s", err)
+				}
+				waiter.Done()
+			}()
+		}
+	}
+	waiter.Wait()
+	return nil
+}
+
+// PostProcessInstancesNoop - runs the post-process script for each instance
+func PostProcessInstancesNoop(groupConf GroupConfig, logger *log.Logger) error {
+	count := groupConf.InstanceCount()
+	logger.Printf("running post launch for %d nodes", count)
+	for i := range groupConf.Tiers {
+		tier := groupConf.Tiers[i]
+		for j := range tier.Instances {
+			inst := tier.Instances[j]
+			logger.Printf("Running (noop) post launch on instance: %s, script: %s", inst.Name, inst.PostLaunch)
+		}
+	}
+	return nil
 }

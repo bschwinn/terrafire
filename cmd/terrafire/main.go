@@ -49,17 +49,13 @@ func main() {
 	if err != nil {
 		panic(fmt.Errorf("fatal error config file: %s", err))
 	}
+	viper.BindPFlags(flag.CommandLine)
 	err = viper.Unmarshal(&ourConfig)
 	if err != nil {
 		fmt.Printf("fatal error unmarshalling config file: %s", err)
 		os.Exit(1)
 	}
 
-	// overlay flags on config
-	// TODO shouldn't pflags/viper handle this?
-	if !ourConfig.Debug {
-		ourConfig.Debug = debug
-	}
 	ourConfig.Group = selectedGroup
 
 	// setup loggers
@@ -95,7 +91,7 @@ func runGroups(cmd *cobra.Command, args []string) error {
 func runHosts(cmd *cobra.Command, args []string) error {
 	group, err := getGroup()
 	if err != nil {
-		return err
+		errorLog.Fatal(err)
 	}
 
 	for i := range group.Tiers {
@@ -177,6 +173,11 @@ func runPlan(cmd *cobra.Command, args []string) error {
 				debugLog.Printf("All Instance Data: %v\n", allInstanceData)
 			}
 		}
+		posterr := terrafire.PostProcessInstancesNoop(group, infoLog)
+		if posterr != nil {
+			errorLog.Fatal(posterr)
+		}
+
 	}
 	return nil
 }
@@ -249,7 +250,29 @@ func runApply(cmd *cobra.Command, args []string) error {
 				debugLog.Printf(" - All Instance Data: %v\n", allInstanceData)
 			}
 		}
+
+		// wait for instances to come up and then run the post launch scripts
+		svc.WaitUntilInstanceRunning(terrafire.CreateGroupInstanceFilter(group))
+		posterr := terrafire.PostProcessInstances(group, infoLog)
+		if posterr != nil {
+			errorLog.Fatal(posterr)
+		}
 	}
+	return nil
+}
+
+// sub-command - run any post launch commands for a group
+func runPost(cmd *cobra.Command, args []string) error {
+	group, err := getGroup()
+	if err != nil {
+		errorLog.Fatal(err)
+	}
+
+	posterr := terrafire.PostProcessInstances(group, infoLog)
+	if posterr != nil {
+		errorLog.Fatal(posterr)
+	}
+
 	return nil
 }
 

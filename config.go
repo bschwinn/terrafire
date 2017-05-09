@@ -49,6 +49,17 @@ func (gc GroupConfig) String() string {
 	return s
 }
 
+// InstanceCount - returns the total number of instances for the group
+func (gc GroupConfig) InstanceCount() int {
+	count := 0
+	for _, t := range gc.Tiers {
+		for range t.Instances {
+			count++
+		}
+	}
+	return count
+}
+
 // EC2InstanceTier  - Teir config for a group
 type EC2InstanceTier struct {
 	Name      string        `mapstructure:"name"`
@@ -90,6 +101,7 @@ type EC2Instance struct {
 	Bootstrap         BootTemplates     `mapstructure:"bootstrap"`
 	UserData          string            `mapstructure:"userdata"`
 	Properties        map[string]string `mapstructure:"properties"`
+	PostLaunch        PostLaunch        `mapstructure:"postlaunch"`
 }
 
 func (inst EC2Instance) String() string {
@@ -101,6 +113,13 @@ type Route53Config struct {
 	ZoneID string `mapstructure:"zoneid"`
 	Suffix string `mapstructure:"suffix"`
 	TTL    int64  `mapstructure:"ttl"`
+}
+
+// PostLaunch - struct for encapsulating a command
+type PostLaunch struct {
+	Command string   `mapstructure:"command"`
+	Dir     string   `mapstructure:"dir"`
+	Args    []string `mapstructure:"args"`
 }
 
 // BootTemplates - struct for header/body/footer templates for UserData

@@ -11,6 +11,7 @@ func init() {
 	RootCmd.AddCommand(destroyCmd)
 	RootCmd.AddCommand(infoCmd)
 	RootCmd.AddCommand(hostsCmd)
+	RootCmd.AddCommand(postCmd)
 }
 
 // sub-commands
@@ -67,4 +68,11 @@ var hostsCmd = &cobra.Command{
 	Short: "Show the list of host names for a group.",
 	Long:  `This will show what host names are configured for a group (group name required).`,
 	RunE:  runHosts,
+}
+
+var postCmd = &cobra.Command{
+	Use:   "post",
+	Short: "Run the post launch commands for a group.",
+	Long:  `This will run any post launch commands that are configured for a group (group name required).`,
+	RunE:  runPost,
 }
